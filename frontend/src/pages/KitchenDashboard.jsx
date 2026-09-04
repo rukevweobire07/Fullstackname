@@ -14,6 +14,7 @@ function KitchenDashboard() {
     const [categoryFilter, setCategoryFilter] = useState('All');
     const [searchTable, setSearchTable] = useState('');
     const [isDarkMode, setIsDarkMode] = useState(true);
+    const [tables, setTables] = useState([]);
 
     useEffect(() => {
         let isMounted = true;
@@ -37,7 +38,17 @@ function KitchenDashboard() {
             }
         };
 
+        const loadTables = async () => {
+            try {
+                const response = await axios.get(`${API_BASE_URL}/api/tables`);
+                if (isMounted) setTables(response.data);
+            } catch (err) {
+                console.error('Error fetching tables:', err);
+            }
+        };
+
         loadOrders();
+        loadTables();
 
         socket.on('orderPlaced', (newOrder) => {
             setOrders((prev) => [newOrder, ...prev]);
@@ -49,16 +60,33 @@ function KitchenDashboard() {
             );
         });
 
+        socket.on('tablesUpdated', (updatedTables) => {
+            setTables(updatedTables);
+        });
+
         return () => {
             isMounted = false;
             socket.off('orderPlaced');
             socket.off('orderStatusUpdated');
+            socket.off('tablesUpdated');
         };
     }, []);
 
+    const releaseTable = async (tableNumber) => {
+        try {
+            const response = await axios.post(`${API_BASE_URL}/api/tables/${tableNumber}/release`);
+            setTables((prev) =>
+                prev.map((t) => (t.tableNumber === tableNumber ? response.data.table : t))
+            );
+        } catch (err) {
+            console.error('Failed to release table:', err);
+            alert('Failed to release table.');
+        }
+    };
+
     const updateStatus = async (orderId, newStatus) => {
         const previousOrders = [...orders];
-        setOrders((prev) => 
+        setOrders((prev) =>
             prev.map(order => order._id === orderId ? { ...order, status: newStatus } : order)
         );
 
@@ -112,11 +140,11 @@ function KitchenDashboard() {
                 activeTab === 'all'
                     ? true
                     : activeTab === 'active'
-                    ? order.status !== 'Served'
-                    : order.status === 'Served';
+                        ? order.status !== 'Served'
+                        : order.status === 'Served';
 
-            const matchesTable = searchTable.trim() === '' 
-                ? true 
+            const matchesTable = searchTable.trim() === ''
+                ? true
                 : String(order.tableNumber).includes(searchTable.trim());
 
             return matchesTab && matchesTable;
@@ -217,10 +245,24 @@ function KitchenDashboard() {
                         </button>
                     )}
                     {order.status === 'Served' && (
-                        <span style={{ color: theme.subText, fontSize: '0.85rem', textAlign: 'center', width: '100%', fontStyle: 'italic' }}>
-                            Order Completed
-                        </span>
+                        (() => {
+                            const orderTable = tables.find((t) => t.tableNumber === order.tableNumber);
+                            const stillReserved = orderTable?.status === 'reserved';
+                            return stillReserved ? (
+                                <button
+                                    onClick={() => releaseTable(order.tableNumber)}
+                                    style={{ flex: 1, padding: '0.6rem', background: '#38a169', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                                >
+                                    🔓 Free Table #{order.tableNumber}
+                                </button>
+                            ) : (
+                                <span style={{ color: theme.subText, fontSize: '0.85rem', textAlign: 'center', width: '100%', fontStyle: 'italic' }}>
+                                    Order Completed
+                                </span>
+                            );
+                        })()
                     )}
+
                 </div>
             </div>
         );
@@ -245,6 +287,39 @@ function KitchenDashboard() {
                         </button>
                     </div>
                 </header>
+
+                {/* Table Availability Map */}
+                {tables.length > 0 && (
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem', color: theme.subText, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                            Table Map
+                        </h3>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {tables.map((t) => {
+                                const reserved = t.status === 'reserved';
+                                return (
+                                    <button
+                                        key={t.tableNumber}
+                                        onClick={() => reserved && releaseTable(t.tableNumber)}
+                                        title={reserved ? `Reserved for ${t.reservedBy} — click to release` : 'Available'}
+                                        style={{
+                                            padding: '0.4rem 0.75rem',
+                                            borderRadius: '8px',
+                                            fontSize: '0.85rem',
+                                            fontWeight: 'bold',
+                                            border: 'none',
+                                            cursor: reserved ? 'pointer' : 'default',
+                                            background: reserved ? '#fed7d7' : '#c6f6d5',
+                                            color: reserved ? '#9b2c2c' : '#22543d'
+                                        }}
+                                    >
+                                        #{t.tableNumber} {reserved ? '🔒' : '✅'}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
                     <div style={{ display: 'flex', gap: '0.5rem', flex: '1 1 300px' }}>

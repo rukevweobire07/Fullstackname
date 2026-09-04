@@ -12,17 +12,26 @@ function CustomerMenu() {
     const [cart, setCart] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeOrder, setActiveOrder] = useState(null);
-    const [isTableBooked, setIsTableBooked] = useState(false);
+    const [tables, setTables] = useState([]);
     const [bookingName, setBookingName] = useState('');
+    const [bookingError, setBookingError] = useState('');
     const [showAuthModal, setShowAuthModal] = useState(false);
-    const [user, setUser] = useState(null);
+    const [user, setUser] = useState(() => {
+    try {
+        const storedUser = localStorage.getItem('user');
+        return storedUser ? JSON.parse(storedUser) : null;
+    } catch {
+        localStorage.removeItem('user');
+        return null;
+    }
+});
     
     // Category Filter State
     const [selectedCategory, setSelectedCategory] = useState('All');
     
     // Theme State
     const [isDarkMode, setIsDarkMode] = useState(false);
-
+    
     useEffect(() => {
         const fetchInventory = async () => {
             try {
@@ -35,7 +44,17 @@ function CustomerMenu() {
             }
         };
 
+        const fetchTables = async () => {
+            try {
+                const response = await axios.get('http://localhost:5000/api/tables');
+                setTables(response.data);
+            } catch (error) {
+                console.error('Error fetching table availability:', error);
+            }
+        };
+
         fetchInventory();
+        fetchTables();
 
         socket.on('inventoryUpdated', (updatedInventory) => {
             setMenuItems(updatedInventory);
@@ -47,11 +66,20 @@ function CustomerMenu() {
             }
         });
 
+        socket.on('tablesUpdated', (updatedTables) => {
+            setTables(updatedTables);
+        });
+
         return () => {
             socket.off('inventoryUpdated');
             socket.off('orderStatusUpdated');
+            socket.off('tablesUpdated');
         };
     }, [tableNum]);
+
+    // Live status of the table this customer is currently sitting at
+    const currentTable = tables.find((t) => t.tableNumber === Number(tableNum));
+    const isTableBooked = currentTable?.status === 'reserved';
 
     const addToCart = (item) => {
         if (item.stockQuantity <= 0 || !item.isAvailable) return;
@@ -98,10 +126,22 @@ function CustomerMenu() {
         }
     };
 
-    const handleBookTable = (e) => {
+    const handleBookTable = async (e) => {
         e.preventDefault();
         if (!bookingName.trim()) return;
-        setIsTableBooked(true);
+        setBookingError('');
+
+        try {
+            const response = await axios.post(
+                `http://localhost:5000/api/tables/${tableNum}/reserve`,
+                { name: bookingName.trim() }
+            );
+            setTables((prev) =>
+                prev.map((t) => (t.tableNumber === Number(tableNum) ? response.data.table : t))
+            );
+        } catch (error) {
+            setBookingError(error.response?.data?.message || 'Failed to reserve table.');
+        }
     };
 
     const getStatusStep = (status) => {
@@ -145,7 +185,7 @@ function CustomerMenu() {
                     <div>
                         <h1 style={{ margin: 0, color: theme.text }}>SmartDine Menu</h1>
                         <p style={{ margin: '0.5rem 0 0', color: theme.subText }}>
-                            Table <strong>#{tableNum}</strong> {isTableBooked && <span style={{ color: '#27ae60', fontWeight: 'bold' }}>• Reserved for {bookingName}</span>}
+                            Table <strong>#{tableNum}</strong> {isTableBooked && <span style={{ color: '#27ae60', fontWeight: 'bold' }}>• Reserved for {currentTable?.reservedBy || bookingName}</span>}
                         </p>
                     </div>
 
@@ -197,6 +237,38 @@ function CustomerMenu() {
                     </div>
                 </header>
 
+                {/* Table Availability Panel */}
+                {tables.length > 0 && (
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem', color: theme.subText, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                            Table Availability
+                        </h3>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {tables.map((t) => {
+                                const isCurrent = t.tableNumber === Number(tableNum);
+                                const reserved = t.status === 'reserved';
+                                return (
+                                    <div
+                                        key={t.tableNumber}
+                                        title={reserved ? `Reserved for ${t.reservedBy}` : 'Available'}
+                                        style={{
+                                            padding: '0.4rem 0.75rem',
+                                            borderRadius: '8px',
+                                            fontSize: '0.85rem',
+                                            fontWeight: 'bold',
+                                            background: reserved ? '#fed7d7' : '#c6f6d5',
+                                            color: reserved ? '#9b2c2c' : '#22543d',
+                                            border: isCurrent ? '2px solid #3182ce' : '2px solid transparent'
+                                        }}
+                                    >
+                                        #{t.tableNumber} {reserved ? '🔒' : '✅'}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {/* Real-time Order Tracker Section */}
                 {activeOrder && (
                     <div style={{ background: isDarkMode ? '#2c5282' : '#ebf8ff', border: `1px solid ${isDarkMode ? '#4299e1' : '#90cdf4'}`, borderRadius: '10px', padding: '1.25rem', marginBottom: '1.5rem' }}>
@@ -232,17 +304,20 @@ function CustomerMenu() {
                         </div>
 
                         {!isTableBooked && activeOrder.status !== 'Served' && (
-                            <form onSubmit={handleBookTable} style={{ marginTop: '1rem', borderTop: `1px dashed ${theme.border}`, paddingTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-                                <input
-                                    type="text"
-                                    placeholder="Enter your name to reserve table..."
-                                    value={bookingName}
-                                    onChange={(e) => setBookingName(e.target.value)}
-                                    style={{ flex: 1, padding: '0.5rem', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.cardBg, color: theme.text }}
-                                />
-                                <button type="submit" style={{ padding: '0.5rem 1rem', background: '#319795', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-                                    Reserve Table
-                                </button>
+                            <form onSubmit={handleBookTable} style={{ marginTop: '1rem', borderTop: `1px dashed ${theme.border}`, paddingTop: '0.75rem' }}>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <input
+                                        type="text"
+                                        placeholder="Enter your name to reserve table..."
+                                        value={bookingName}
+                                        onChange={(e) => setBookingName(e.target.value)}
+                                        style={{ flex: 1, padding: '0.5rem', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.cardBg, color: theme.text }}
+                                    />
+                                    <button type="submit" style={{ padding: '0.5rem 1rem', background: '#319795', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
+                                        Reserve Table
+                                    </button>
+                                </div>
+                                {bookingError && <p style={{ color: '#fc8181', fontSize: '0.85rem', marginTop: '0.5rem' }}>{bookingError}</p>}
                             </form>
                         )}
                     </div>
@@ -394,15 +469,16 @@ function CustomerMenu() {
                 </div>
 
                 {/* Auth Modal Component */}
-                {showAuthModal && (
-                    <AuthModal
-                        onClose={() => setShowAuthModal(false)}
-                        onSuccess={(userData) => {
-                            setUser(userData);
-                            setShowAuthModal(false);
-                        }}
-                    />
-                )}
+                <AuthModal
+                    isOpen={showAuthModal}
+                    onClose={() => setShowAuthModal(false)}
+                    onUserAuthenticated={(userData) => {
+                        setUser(userData);
+                        localStorage.setItem('user', JSON.stringify(userData));
+                        setShowAuthModal(false);
+                    }}
+                />
+
             </div>
         </div>
     );

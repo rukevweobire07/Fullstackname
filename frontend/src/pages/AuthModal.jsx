@@ -12,7 +12,6 @@ function AuthModal({ isOpen, onClose, onUserAuthenticated }) {
         e.preventDefault();
         setError('');
         const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-
         try {
             const res = await axios.post(`http://localhost:5000${endpoint}`, formData);
             localStorage.setItem('user', JSON.stringify(res.data.user));
@@ -28,7 +27,7 @@ function AuthModal({ isOpen, onClose, onUserAuthenticated }) {
             <div style={{ background: '#1a202c', color: '#fff', padding: '2rem', borderRadius: '10px', width: '350px', border: '1px solid #4a5568' }}>
                 <h2 style={{ marginTop: 0 }}>{isLogin ? 'Login to Smart Dine' : 'Create Account'}</h2>
                 {error && <p style={{ color: '#fc8181', fontSize: '0.9rem' }}>{error}</p>}
-                
+
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     {!isLogin && (
                         <input
@@ -60,7 +59,6 @@ function AuthModal({ isOpen, onClose, onUserAuthenticated }) {
                         {isLogin ? 'Login' : 'Register (+50 Points)'}
                     </button>
                 </form>
-
                 <div style={{ marginTop: '1rem', textAlign: 'center', fontSize: '0.85rem' }}>
                     <span onClick={() => setIsLogin(!isLogin)} style={{ color: '#63b3ed', cursor: 'pointer' }}>
                         {isLogin ? "Don't have an account? Register" : 'Already have an account? Login'}
